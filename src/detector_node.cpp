@@ -8,10 +8,10 @@
 #include <map>
 #include <opencv2/aruco.hpp>
 #include <opencv2/opencv.hpp>
+#include <ros/package.h>
 #include <ros/ros.h>
 #include <sensor_msgs/Image.h>
 #include <sstream>
-#include <ros/package.h>
 #include <tf/tf.h>
 
 void setQuaternionFromRvec(cv::Vec<double, 3> &rvec,
@@ -87,11 +87,14 @@ private:
       distCoeffs_ = cv::Mat(1, dist_coeffs_values.size(), CV_64F,
                             dist_coeffs_values.data())
                         .clone();
-      ROS_INFO_STREAM("Loaded Camera Matrix:\n" << cameraMatrix_ << "Loaded "
-                                                  "Distortion Coefficients:\n"
-                                               << distCoeffs_);
+      ROS_INFO_STREAM("Loaded Camera Matrix:\n"
+                      << cameraMatrix_
+                      << "Loaded "
+                         "Distortion Coefficients:\n"
+                      << distCoeffs_);
     } else {
-      ROS_ERROR_STREAM("Invalid calibration file format. FAILED TRYING TO LOAD " << calib_file);
+      ROS_ERROR_STREAM("Invalid calibration file format. FAILED TRYING TO LOAD "
+                       << calib_file);
     }
   }
 };
@@ -101,14 +104,16 @@ public:
   ArucoDetector(ros::NodeHandle &nh, int num_cameras)
       : nh_(nh), it_(nh), objPoints(4, 1, CV_32FC3) {
 
-        std::string package_path = ros::package::getPath("auv_mocap");
+    std::string package_path = ros::package::getPath("auv_mocap");
 
     for (int i = 0; i < num_cameras; ++i) {
       int camera_id = i + 1;
-      cameras.push_back(
-          Camera(nh_, cv::format("/camera_%d/image_raw", camera_id), cv::format("%s/calibration_files/camera_%d.txt", package_path.c_str(), camera_id),
-                 std::bind(&ArucoDetector::imageCallback, this,
-                           std::placeholders::_1, camera_id)));
+      cameras.push_back(Camera(nh_,
+                               cv::format("/camera_%d/image_raw", camera_id),
+                               cv::format("%s/calibration_files/camera_%d.txt",
+                                          package_path.c_str(), camera_id),
+                               std::bind(&ArucoDetector::imageCallback, this,
+                                         std::placeholders::_1, camera_id)));
     }
     // cam2_ =
     //     std::make_unique<Camera>(nh_, "/four/image_raw", "./david.txt",
@@ -165,7 +170,13 @@ private:
         pose_array_msg.header.stamp = ros::Time::now();
         pose_array_msg.header.frame_id = cameraName;
 
+        bool foundGlobalMarker = false;
         for (size_t i = 0; i < markerIds.size(); ++i) {
+          
+          if (markerIds[i] == 0) {
+            foundGlobalMarker = true;
+          }
+
           cv::drawFrameAxes(imageCopy, cameraMatrix, distCoeffs, rvecs[i],
                             tvecs[i], markerLength * 1.5f, 2);
 
@@ -183,6 +194,10 @@ private:
           pose_msg.pose.orientation = q;
 
           pose_array_msg.poses.push_back(pose_msg);
+        }
+
+        if (!foundGlobalMarker) {
+          ROS_WARN("CAMERA %d: Global marker not detected", camera_id);
         }
 
         // Publish the ArucoPoseArray message
