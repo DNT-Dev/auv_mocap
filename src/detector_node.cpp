@@ -1,33 +1,15 @@
-#include "opencv2/aruco/dictionary.hpp"
-#include <auv_mocap/ArucoPoseArray.h>
-#include <cstdio>
 #include <cv_bridge/cv_bridge.h>
 #include <fstream>
 #include <geometry_msgs/PoseStamped.h>
 #include <image_transport/image_transport.h>
-#include <map>
 #include <opencv2/aruco.hpp>
 #include <opencv2/opencv.hpp>
+#include "opencv2/aruco/dictionary.hpp"
 #include <ros/package.h>
 #include <ros/ros.h>
+#include "tf2_ros/transform_broadcaster.h"
 #include <sensor_msgs/Image.h>
 #include <sstream>
-#include <tf/tf.h>
-
-void setQuaternionFromRvec(cv::Vec<double, 3> &rvec,
-                           geometry_msgs::Quaternion &q) {
-  cv::Mat R;
-  cv::Rodrigues(rvec, R);
-  tf::Matrix3x3 tfR(R.at<double>(0, 0), R.at<double>(0, 1), R.at<double>(0, 2),
-                    R.at<double>(1, 0), R.at<double>(1, 1), R.at<double>(1, 2),
-                    R.at<double>(2, 0), R.at<double>(2, 1), R.at<double>(2, 2));
-  tf::Quaternion tfQ;
-  tfR.getRotation(tfQ);
-  q.x = tfQ.x();
-  q.y = tfQ.y();
-  q.z = tfQ.z();
-  q.w = tfQ.w();
-}
 
 class Camera {
 public:
@@ -115,12 +97,6 @@ public:
                                std::bind(&ArucoDetector::imageCallback, this,
                                          std::placeholders::_1, camera_id)));
     }
-    // cam2_ =
-    //     std::make_unique<Camera>(nh_, "/four/image_raw", "./david.txt",
-    //                              std::bind(&ArucoDetector::imageCallback,
-    //                              this,
-    //                                        std::placeholders::_1, "Camera
-    //                                        2"));
 
     objPoints.ptr<cv::Vec3f>(0)[0] =
         cv::Vec3f(-markerLength / 2.f, markerLength / 2.f, 0);
@@ -137,9 +113,9 @@ public:
 private:
   ros::NodeHandle nh_;
   image_transport::ImageTransport it_;
-  std::map<std::string, ros::Publisher> camera_publishers_;
   cv::Mat objPoints;
   std::vector<Camera> cameras;
+  static tf2_ros::TransformBroadcaster br;
   // Length of the marker side in meters
   const float markerLength = 0.15f;
   void imageCallback(const sensor_msgs::ImageConstPtr &msg,
@@ -147,11 +123,13 @@ private:
     const std::string cameraName = cv::format("Camera %d", camera_id);
     cv::Mat imageCopy;
     try {
-      cv::Mat image = cv_bridge::toCvShare(msg, "bgr8")->image;
       std::vector<int> markerIds;
       std::vector<std::vector<cv::Point2f>> markerCorners;
       cv::Ptr<cv::aruco::Dictionary> dictionary =
           cv::aruco::getPredefinedDictionary(cv::aruco::DICT_4X4_250);
+
+      // detect aruco markers
+      cv::Mat image = cv_bridge::toCvShare(msg, "bgr8")->image;
       cv::aruco::detectMarkers(image, dictionary, markerCorners, markerIds);
       image.copyTo(imageCopy);
 
@@ -159,20 +137,16 @@ private:
         const cv::Mat &cameraMatrix = cameras[camera_id - 1].getCameraMatrix();
         const cv::Mat &distCoeffs = cameras[camera_id - 1].getDistCoeffs();
 
+        // convert maker points (2d) to 3d
         std::vector<cv::Vec3d> rvecs(markerIds.size()), tvecs(markerIds.size());
         for (size_t i = 0; i < markerIds.size(); ++i) {
           cv::solvePnP(objPoints, markerCorners.at(i), cameraMatrix, distCoeffs,
                        rvecs.at(i), tvecs.at(i));
         }
 
-        // Create a single message per camera
-        auv_mocap::ArucoPoseArray pose_array_msg;
-        pose_array_msg.header.stamp = ros::Time::now();
-        pose_array_msg.header.frame_id = cameraName;
-
         bool foundGlobalMarker = false;
         for (size_t i = 0; i < markerIds.size(); ++i) {
-          
+
           if (markerIds[i] == 0) {
             foundGlobalMarker = true;
           }
@@ -180,33 +154,12 @@ private:
           cv::drawFrameAxes(imageCopy, cameraMatrix, distCoeffs, rvecs[i],
                             tvecs[i], markerLength * 1.5f, 2);
 
-          auv_mocap::ArucoPose pose_msg;
-          pose_msg.header.stamp = ros::Time::now();
-          pose_msg.header.frame_id = cameraName;
-          pose_msg.header.seq = i;
-          pose_msg.id = markerIds[i];
-          pose_msg.pose.position.x = tvecs[i][0];
-          pose_msg.pose.position.y = tvecs[i][1];
-          pose_msg.pose.position.z = tvecs[i][2];
-
-          geometry_msgs::Quaternion q;
-          setQuaternionFromRvec(rvecs[i], q);
-          pose_msg.pose.orientation = q;
-
-          pose_array_msg.poses.push_back(pose_msg);
+          
         }
 
         if (!foundGlobalMarker) {
           ROS_WARN("CAMERA %d: Global marker not detected", camera_id);
         }
-
-        // Publish the ArucoPoseArray message
-        if (camera_publishers_.find(cameraName) == camera_publishers_.end()) {
-          camera_publishers_[cameraName] =
-              nh_.advertise<auv_mocap::ArucoPoseArray>(
-                  cv::format("/camera_%d/aruco_pose", camera_id), 10);
-        }
-        camera_publishers_[cameraName].publish(pose_array_msg);
       }
 
       if (!markerIds.empty()) {
