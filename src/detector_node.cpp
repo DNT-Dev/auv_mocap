@@ -4,12 +4,15 @@
 #include <image_transport/image_transport.h>
 #include <opencv2/aruco.hpp>
 #include <opencv2/opencv.hpp>
+#include "geometry_msgs/TransformStamped.h"
 #include "opencv2/aruco/dictionary.hpp"
 #include <ros/package.h>
 #include <ros/ros.h>
+#include "tf2/LinearMath/Quaternion.h"
 #include "tf2_ros/transform_broadcaster.h"
 #include <sensor_msgs/Image.h>
 #include <sstream>
+#include "mocap/utils.hpp"
 
 class Camera {
 public:
@@ -115,12 +118,13 @@ private:
   image_transport::ImageTransport it_;
   cv::Mat objPoints;
   std::vector<Camera> cameras;
-  static tf2_ros::TransformBroadcaster br;
+
   // Length of the marker side in meters
   const float markerLength = 0.15f;
   void imageCallback(const sensor_msgs::ImageConstPtr &msg,
                      const int camera_id) {
-    const std::string cameraName = cv::format("Camera %d", camera_id);
+                      static tf2_ros::TransformBroadcaster tf_br;
+    const std::string cameraName = cv::format("camera_%d", camera_id);
     cv::Mat imageCopy;
     try {
       std::vector<int> markerIds;
@@ -150,6 +154,27 @@ private:
           if (markerIds[i] == 0) {
             foundGlobalMarker = true;
           }
+
+          auto transform = geometry_msgs::TransformStamped();
+          transform.header.stamp = ros::Time::now();
+          transform.header.frame_id = cameraName;
+          transform.child_frame_id =
+              cv::format("aruco_marker_%d", markerIds[i]);
+
+          transform.transform.translation.x = tvecs[i][0];
+          transform.transform.translation.y = tvecs[i][1];
+          transform.transform.translation.z = tvecs[i][2];
+
+          // tf2::Transform transform;
+          tf2::Quaternion q;
+          quaternionFromRvecs(rvecs[i], q);
+          
+          transform.transform.rotation.x = q.x();
+          transform.transform.rotation.y = q.y();
+          transform.transform.rotation.z = q.z();
+          transform.transform.rotation.w = q.w();
+
+          tf_br.sendTransform(transform);
 
           cv::drawFrameAxes(imageCopy, cameraMatrix, distCoeffs, rvecs[i],
                             tvecs[i], markerLength * 1.5f, 2);
