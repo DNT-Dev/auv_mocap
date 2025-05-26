@@ -33,7 +33,11 @@ class StateEstimator {
   ros::Publisher m0_to_m1_pub;
 
 public:
-  StateEstimator(ros::NodeHandle &nh) { m0_to_m1.setIdentity(); m0_to_m1_pub = nh.advertise<geometry_msgs::TransformStamped>("m0_to_m1", 10); }
+  StateEstimator(ros::NodeHandle &nh) {
+    m0_to_m1.setIdentity();
+    m0_to_m1_pub =
+        nh.advertise<geometry_msgs::TransformStamped>("m0_to_m1", 10);
+  }
   void addTransformToState(std::vector<tf2::Transform> &transforms) {
     // THIS PART IS SUPER SKETCHY???
     if (transforms.empty()) {
@@ -70,7 +74,8 @@ public:
     avg_quat.normalize();
 
     m0_to_m1 = tf2::Transform(avg_quat, avg_translation);
-    auto transform_msg = tf2::toMsg<typeof(m0_to_m1), geometry_msgs::TransformStamped>(m0_to_m1);
+    auto transform_msg =
+        tf2::toMsg<typeof(m0_to_m1), geometry_msgs::TransformStamped>(m0_to_m1);
     transform_msg.header.stamp = ros::Time::now();
     transform_msg.header.frame_id = "aruco_maker_0";
     transform_msg.child_frame_id = "aruco_marker_1";

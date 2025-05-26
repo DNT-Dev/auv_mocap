@@ -15,9 +15,11 @@ catkin_make
   /camera_3/image_raw  
   ... etc  
 
+  Put the calibration files for the same in ${ROS_WORKSPACE}/src/auv_mocap/calibration_files and name them camera_%d.txt like camera_1.txt, camera_2.txt and so on
+
 4) Run Aruco marker detection node
    
-  ```rosrun auv_mocap detector_node your_calibration_file.txt```   
+  ```rosrun auv_mocap detector_node _num_cameras:=${NUMBER OF CAMERAS}```   
 
 4) Run the transform calculator node   
 
