@@ -1,0 +1,16 @@
+<launch>
+  <!-- Launch the FFmpeg Webcam Publisher Node (C++) -->
+  <node pkg="ffmpeg_ros_camera_cpp" type="ffmpeg_webcam_node_cpp" name="camera_1" output="screen">
+  	<remap from="/camera_1/image" to="/camera_1/image_raw" />
+    <!-- Parameters for webcam node -->
+    <param name="video_device" value="/dev/video0" />
+    <param name="frame_width" value="640" />
+    <param name="frame_height" value="480" />
+    <param name="frame_rate" value="30" />
+    <param name="camera_name" value="camera_1" />
+    <param name="output_pixel_format" value="bgr24" />
+    <!-- Optional: Uncomment and set if your camera requires a specific input pixel format (e.g., 'yuyv422') -->
+    <param name="input_pixel_format" value="mjpeg" /> 
+  </node>
+
+  </launch>

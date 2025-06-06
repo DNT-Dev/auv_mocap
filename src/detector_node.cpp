@@ -1,18 +1,18 @@
+#include "geometry_msgs/TransformStamped.h"
+#include "mocap/utils.hpp"
+#include "opencv2/aruco/dictionary.hpp"
+#include "tf2/LinearMath/Quaternion.h"
+#include "tf2_ros/transform_broadcaster.h"
 #include <cv_bridge/cv_bridge.h>
 #include <fstream>
 #include <geometry_msgs/PoseStamped.h>
 #include <image_transport/image_transport.h>
 #include <opencv2/aruco.hpp>
 #include <opencv2/opencv.hpp>
-#include "geometry_msgs/TransformStamped.h"
-#include "opencv2/aruco/dictionary.hpp"
 #include <ros/package.h>
 #include <ros/ros.h>
-#include "tf2/LinearMath/Quaternion.h"
-#include "tf2_ros/transform_broadcaster.h"
 #include <sensor_msgs/Image.h>
 #include <sstream>
-#include "mocap/utils.hpp"
 
 class Camera {
 public:
@@ -123,7 +123,7 @@ private:
   const float markerLength = 0.15f;
   void imageCallback(const sensor_msgs::ImageConstPtr &msg,
                      const int camera_id) {
-                      static tf2_ros::TransformBroadcaster tf_br;
+    static tf2_ros::TransformBroadcaster tf_br;
     const std::string cameraName = cv::format("camera_%d", camera_id);
     cv::Mat imageCopy;
     try {
@@ -168,18 +168,28 @@ private:
           // tf2::Transform transform;
           tf2::Quaternion q;
           quaternionFromRvecs(rvecs[i], q);
-          
+          q.normalize();
+
+          ROS_INFO_STREAM("CAMERA " << camera_id
+                          << ": Detected marker " << markerIds[i]
+                          << " with translation: "
+                          << transform.transform.translation.x << ", "
+                          << transform.transform.translation.y << ", "
+                          << transform.transform.translation.z
+                          << " and rotation: " << q.x() << ", " << q.y()
+                          << ", " << q.z() << ", " << q.w());
+
           transform.transform.rotation.x = q.x();
           transform.transform.rotation.y = q.y();
           transform.transform.rotation.z = q.z();
           transform.transform.rotation.w = q.w();
 
           tf_br.sendTransform(transform);
+          // ROS_INFO("CAMERA %d: Sent transform to marker %d", camera_id,
+                  //  markerIds[i]);
 
           cv::drawFrameAxes(imageCopy, cameraMatrix, distCoeffs, rvecs[i],
                             tvecs[i], markerLength * 1.5f, 2);
-
-          
         }
 
         if (!foundGlobalMarker) {
@@ -202,10 +212,12 @@ private:
 
 int main(int argc, char **argv) {
   ros::init(argc, argv, "aruco_detector");
-  ros::NodeHandle nh;
+  ros::NodeHandle nh("~");
 
   int num_cameras;
   nh.param("num_cameras", num_cameras, 1);
+
+  ROS_INFO("Initializing %d cameras", num_cameras);
 
   ArucoDetector detector(nh, num_cameras);
   detector.spin();

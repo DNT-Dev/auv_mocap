@@ -1,0 +1,7 @@
+<launch>
+	<node pkg="ffmpeg_ros_camera_cpp" type="image_flipper_node" name="camera_2_fix" output="screen">
+		<param name="input_topic" value="/camera_2/image_raw_unflipped" />
+		<param name="output_topic" value="/camera_2/image_raw" />
+		<param name="flip_code" value="-1" />
+	</node>
+</launch>

@@ -1,0 +1,7 @@
+<launch>
+	<include file="$(find auv_mocap)/launch/camera_1.launch" />
+	<include file="$(find auv_mocap)/launch/camera_2.launch" />
+	<include file="$(find auv_mocap)/launch/camera_3_fix.launch" />
+
+</launch>
+

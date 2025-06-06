@@ -1,0 +1,16 @@
+<launch>
+
+  <!-- Launch the FFmpeg MJPEG Stream Publisher Node (C++) -->
+  <node pkg="ffmpeg_ros_camera_cpp" type="ffmpeg_mjpeg_node_cpp" name="camera_3" output="screen">
+  	<remap from="/camera_3/image" to="/camera_3/image_raw" />
+    <!-- Parameters for MJPEG stream node -->
+    <param name="mjpeg_url" value="http://192.168.1.9:5780/video" />
+    <param name="frame_width" value="640" />
+    <param name="frame_height" value="480" />
+    <param name="frame_rate" value="30" />
+    <param name="camera_name" value="camera_3" />
+    <param name="output_pixel_format" value="bgr24" />
+    </node>
+
+
+</launch>

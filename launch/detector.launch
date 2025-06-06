@@ -1,0 +1,6 @@
+<launch>
+ <node pkg="auv_mocap" type="detector_node" name="aruco_detector" output="screen">
+ <param name="num_cameras" value="3" />
+  </node>
+
+</launch>
