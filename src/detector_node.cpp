@@ -13,6 +13,8 @@
 #include <ros/ros.h>
 #include <sensor_msgs/Image.h>
 #include <sstream>
+#include <string>
+#include <unordered_map>
 
 class Camera {
 public:
@@ -85,9 +87,11 @@ private:
 };
 
 class ArucoDetector {
+  int _num_markers;
+
 public:
-  ArucoDetector(ros::NodeHandle &nh, int num_cameras)
-      : nh_(nh), it_(nh), objPoints(4, 1, CV_32FC3) {
+  ArucoDetector(ros::NodeHandle &nh, int num_cameras, int num_markers)
+      : nh_(nh), it_(nh), objPoints(4, 1, CV_32FC3), _num_markers(num_markers) {
 
     std::string package_path = ros::package::getPath("auv_mocap");
 
@@ -110,6 +114,7 @@ public:
     objPoints.ptr<cv::Vec3f>(0)[3] =
         cv::Vec3f(-markerLength / 2.f, -markerLength / 2.f, 0);
   }
+  
 
   void spin() { ros::spin(); }
 
@@ -118,6 +123,13 @@ private:
   image_transport::ImageTransport it_;
   cv::Mat objPoints;
   std::vector<Camera> cameras;
+  std::vector<int> markerIds;
+  std::vector<std::vector<cv::Point2f>> markerCorners;
+  cv::Ptr<cv::aruco::Dictionary> dictionary =
+      cv::aruco::getPredefinedDictionary(cv::aruco::DICT_4X4_250);
+  std::vector<cv::Vec3d> rvecs = std::vector<cv::Vec3d>(10, cv::Vec3d(0, 0, 0));
+  std::vector<cv::Vec3d> tvecs = std::vector<cv::Vec3d>(10, cv::Vec3d(0, 0, 0));
+  geometry_msgs::TransformStamped transform;
 
   // Length of the marker side in meters
   const float markerLength = 0.15f;
@@ -127,22 +139,16 @@ private:
     const std::string cameraName = cv::format("camera_%d", camera_id);
     cv::Mat imageCopy;
     try {
-      std::vector<int> markerIds;
-      std::vector<std::vector<cv::Point2f>> markerCorners;
-      cv::Ptr<cv::aruco::Dictionary> dictionary =
-          cv::aruco::getPredefinedDictionary(cv::aruco::DICT_4X4_250);
-
       // detect aruco markers
       cv::Mat image = cv_bridge::toCvShare(msg, "bgr8")->image;
       cv::aruco::detectMarkers(image, dictionary, markerCorners, markerIds);
-      image.copyTo(imageCopy);
+      // image.copyTo(imageCopy);
 
       if (!markerIds.empty()) {
         const cv::Mat &cameraMatrix = cameras[camera_id - 1].getCameraMatrix();
         const cv::Mat &distCoeffs = cameras[camera_id - 1].getDistCoeffs();
 
         // convert maker points (2d) to 3d
-        std::vector<cv::Vec3d> rvecs(markerIds.size()), tvecs(markerIds.size());
         for (size_t i = 0; i < markerIds.size(); ++i) {
           cv::solvePnP(objPoints, markerCorners.at(i), cameraMatrix, distCoeffs,
                        rvecs.at(i), tvecs.at(i));
@@ -151,11 +157,14 @@ private:
         bool foundGlobalMarker = false;
         for (size_t i = 0; i < markerIds.size(); ++i) {
 
+          if (markerIds[i] > 1) {
+            continue;
+          }
+
           if (markerIds[i] == 0) {
             foundGlobalMarker = true;
           }
 
-          auto transform = geometry_msgs::TransformStamped();
           transform.header.stamp = ros::Time::now();
           transform.header.frame_id = cameraName;
           transform.child_frame_id =
@@ -170,14 +179,13 @@ private:
           quaternionFromRvecs(rvecs[i], q);
           q.normalize();
 
-          ROS_INFO_STREAM("CAMERA " << camera_id
-                          << ": Detected marker " << markerIds[i]
-                          << " with translation: "
-                          << transform.transform.translation.x << ", "
-                          << transform.transform.translation.y << ", "
-                          << transform.transform.translation.z
-                          << " and rotation: " << q.x() << ", " << q.y()
-                          << ", " << q.z() << ", " << q.w());
+          ROS_INFO_STREAM("CAMERA " << camera_id << ": Detected marker "
+                                    << markerIds[i] << " with translation: "
+                                    << transform.transform.translation.x << ", "
+                                    << transform.transform.translation.y << ", "
+                                    << transform.transform.translation.z
+                                    << " and rotation: " << q.x() << ", "
+                                    << q.y() << ", " << q.z() << ", " << q.w());
 
           transform.transform.rotation.x = q.x();
           transform.transform.rotation.y = q.y();
@@ -186,10 +194,10 @@ private:
 
           tf_br.sendTransform(transform);
           // ROS_INFO("CAMERA %d: Sent transform to marker %d", camera_id,
-                  //  markerIds[i]);
+          //  markerIds[i]);
 
-          cv::drawFrameAxes(imageCopy, cameraMatrix, distCoeffs, rvecs[i],
-                            tvecs[i], markerLength * 1.5f, 2);
+          // cv::drawFrameAxes(imageCopy, cameraMatrix, distCoeffs, rvecs[i],
+          //                   tvecs[i], markerLength * 1.5f, 2);
         }
 
         if (!foundGlobalMarker) {
@@ -197,16 +205,18 @@ private:
         }
       }
 
-      if (!markerIds.empty()) {
-        cv::aruco::drawDetectedMarkers(imageCopy, markerCorners, markerIds);
-      }
+      // if (!markerIds.empty()) {
+      //   cv::aruco::drawDetectedMarkers(imageCopy, markerCorners, markerIds);
+      // }
 
-      cv::imshow(cameraName, imageCopy);
-      cv::waitKey(1);
+      // cv::imshow(cameraName, imageCopy);
+      // cv::waitKey(1);
     } catch (cv_bridge::Exception &e) {
       ROS_ERROR("Could not convert from '%s' to 'bgr8'.",
                 msg->encoding.c_str());
     }
+
+    
   }
 };
 
@@ -217,9 +227,12 @@ int main(int argc, char **argv) {
   int num_cameras;
   nh.param("num_cameras", num_cameras, 1);
 
+  int num_markers;
+  nh.param("num_markers", num_markers, 1);
+
   ROS_INFO("Initializing %d cameras", num_cameras);
 
-  ArucoDetector detector(nh, num_cameras);
+  ArucoDetector detector(nh, num_cameras, num_markers);
   detector.spin();
   return 0;
 }

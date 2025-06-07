@@ -1,0 +1,23 @@
+<launch>
+  <node pkg="auv_mocap" type="sync_camera.py" name="camera_sync_node" output="screen">
+  <!-- The total number of cameras in your system that you want to synchronize. The node will expect TF frames from camera_1 to camera_N (where N is num_cameras). -->
+    <param name="~num_cameras" value="3" />
+<!-- The 1-indexed number of the camera that will serve as the reference clock. All other camera delays will be calculated relative to this camera. For example, 1 means camera_1 will be the reference. -->
+    <param name="~reference_camera_idx" value="2" />
+<!-- The total number of ArUco (or similar) markers being tracked. The node expects aruco_marker_0, aruco_marker_1, ..., aruco_marker_N-1. Minimum is 2 markers. -->
+    <param name="~num_markers" value="2" />
+
+<!-- The maximum number of transform messages to store in each camera's buffer for each marker. A larger buffer allows for longer sync_window_sec but uses more memory. -->
+    <param name="~buffer_size" value="1000" />
+
+<!-- The target uniform sample rate (in Hz) to which the irregularly sampled TF data is resampled for cross-correlation. This should typically be around or slightly below your camera's actual frame rate for best results. -->
+    <param name="~sample_rate_target" value="25.0" />
+<!-- 	The duration (in seconds) of recent data to use for the cross-correlation calculation. A longer window can provide more robust results but might be slower to react to clock drift and requires more buffer data. -->
+    <param name="~sync_window_sec" value="10.0" />
+    <!-- The maximum expected time difference (in seconds) that the cross-correlation algorithm will search for a peak. Set this wider than your largest anticipated clock difference between cameras. -->
+    <param name="~correlation_search_range_sec" value="0.5" />
+<!-- The interval (in seconds) at which the node will re-run the synchronization algorithm and publish the updated time delays. -->
+    <param name="~sync_timer_interval_sec" value="5.0" />
+
+  </node>
+</launch>
