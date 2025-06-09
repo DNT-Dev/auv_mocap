@@ -1,7 +1,10 @@
 #include "geometry_msgs/TransformStamped.h"
 #include "mocap/utils.hpp"
 #include "opencv2/aruco/dictionary.hpp"
+#include "ros/publisher.h"
+#include "ros/spinner.h"
 #include "tf2/LinearMath/Quaternion.h"
+#include "tf2/LinearMath/Transform.h"
 #include "tf2_ros/transform_broadcaster.h"
 #include <cv_bridge/cv_bridge.h>
 #include <fstream>
@@ -22,7 +25,7 @@ public:
          const std::string &calib_file,
          std::function<void(const sensor_msgs::ImageConstPtr &)> callback)
       : it_(nh) {
-    sub_ = it_.subscribe(topic, 1, callback);
+    sub_ = it_.subscribe(topic, 0, callback);
     loadCalibration(calib_file);
   }
 
@@ -88,6 +91,7 @@ private:
 
 class ArucoDetector {
   int _num_markers;
+  std::vector<ros::Publisher> _marker_publishers;
 
 public:
   ArucoDetector(ros::NodeHandle &nh, int num_cameras, int num_markers)
@@ -103,6 +107,8 @@ public:
                                           package_path.c_str(), camera_id),
                                std::bind(&ArucoDetector::imageCallback, this,
                                          std::placeholders::_1, camera_id)));
+      _marker_publishers.push_back(nh_.advertise<sensor_msgs::Image>(
+          cv::format("/camera_%d/detected_markers", camera_id), 10));
     }
 
     objPoints.ptr<cv::Vec3f>(0)[0] =
@@ -114,9 +120,11 @@ public:
     objPoints.ptr<cv::Vec3f>(0)[3] =
         cv::Vec3f(-markerLength / 2.f, -markerLength / 2.f, 0);
   }
-  
 
-  void spin() { ros::spin(); }
+  void spin() {
+    ros::MultiThreadedSpinner spinner(4);
+    spinner.spin();
+  }
 
 private:
   ros::NodeHandle nh_;
@@ -142,7 +150,7 @@ private:
       // detect aruco markers
       cv::Mat image = cv_bridge::toCvShare(msg, "bgr8")->image;
       cv::aruco::detectMarkers(image, dictionary, markerCorners, markerIds);
-      // image.copyTo(imageCopy);
+      image.copyTo(imageCopy);
 
       if (!markerIds.empty()) {
         const cv::Mat &cameraMatrix = cameras[camera_id - 1].getCameraMatrix();
@@ -166,38 +174,49 @@ private:
           }
 
           transform.header.stamp = ros::Time::now();
-          transform.header.frame_id = cameraName;
-          transform.child_frame_id =
+          // Swap frame_id and child_frame_id for inverted transform
+          transform.header.frame_id =
               cv::format("aruco_marker_%d", markerIds[i]);
+          transform.child_frame_id = cameraName;
 
-          transform.transform.translation.x = tvecs[i][0];
-          transform.transform.translation.y = tvecs[i][1];
-          transform.transform.translation.z = tvecs[i][2];
+          // Original transform: camera -> marker
+          tf2::Vector3 t_orig(tvecs[i][0], tvecs[i][1], tvecs[i][2]);
+          tf2::Quaternion q_orig;
+          quaternionFromRvecs(rvecs[i], q_orig);
+          q_orig.normalize();
 
-          // tf2::Transform transform;
-          tf2::Quaternion q;
-          quaternionFromRvecs(rvecs[i], q);
-          q.normalize();
+          tf2::Transform tf_orig(q_orig, t_orig);
+
+          // Invert the transform: marker -> camera
+          tf2::Transform tf_inv = tf_orig.inverse();
+
+          tf2::Vector3 t_inv = tf_inv.getOrigin();
+          tf2::Quaternion q_inv = tf_inv.getRotation();
+
+          transform.transform.translation.x = t_inv.x();
+          transform.transform.translation.y = t_inv.y();
+          transform.transform.translation.z = t_inv.z();
 
           ROS_INFO_STREAM("CAMERA " << camera_id << ": Detected marker "
                                     << markerIds[i] << " with translation: "
                                     << transform.transform.translation.x << ", "
                                     << transform.transform.translation.y << ", "
                                     << transform.transform.translation.z
-                                    << " and rotation: " << q.x() << ", "
-                                    << q.y() << ", " << q.z() << ", " << q.w());
+                                    << " and rotation: " << q_inv.x() << ", "
+                                    << q_inv.y() << ", " << q_inv.z() << ", "
+                                    << q_inv.w());
 
-          transform.transform.rotation.x = q.x();
-          transform.transform.rotation.y = q.y();
-          transform.transform.rotation.z = q.z();
-          transform.transform.rotation.w = q.w();
+          transform.transform.rotation.x = q_inv.x();
+          transform.transform.rotation.y = q_inv.y();
+          transform.transform.rotation.z = q_inv.z();
+          transform.transform.rotation.w = q_inv.w();
 
           tf_br.sendTransform(transform);
           // ROS_INFO("CAMERA %d: Sent transform to marker %d", camera_id,
           //  markerIds[i]);
 
-          // cv::drawFrameAxes(imageCopy, cameraMatrix, distCoeffs, rvecs[i],
-          //                   tvecs[i], markerLength * 1.5f, 2);
+          cv::drawFrameAxes(imageCopy, cameraMatrix, distCoeffs, rvecs[i],
+                            tvecs[i], markerLength * 1.5f, 2);
         }
 
         if (!foundGlobalMarker) {
@@ -205,9 +224,16 @@ private:
         }
       }
 
-      // if (!markerIds.empty()) {
-      //   cv::aruco::drawDetectedMarkers(imageCopy, markerCorners, markerIds);
-      // }
+      if (!markerIds.empty()) {
+        try {
+          cv::aruco::drawDetectedMarkers(imageCopy, markerCorners, markerIds);
+        } catch (const std::exception &e) {
+          ROS_ERROR("Failed to draw detected markers: %s", e.what());
+        }
+      }
+
+      _marker_publishers[camera_id - 1].publish(
+          cv_bridge::CvImage(msg->header, "bgr8", imageCopy).toImageMsg());
 
       // cv::imshow(cameraName, imageCopy);
       // cv::waitKey(1);
@@ -215,8 +241,6 @@ private:
       ROS_ERROR("Could not convert from '%s' to 'bgr8'.",
                 msg->encoding.c_str());
     }
-
-    
   }
 };
 
